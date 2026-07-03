@@ -1,6 +1,8 @@
 #ifndef SPACE_MANAGER
 #define SPACE_MANAGER
 
+#include "event_serialize.h"
+
 struct space_label
 {
     uint64_t sid;

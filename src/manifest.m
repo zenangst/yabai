@@ -77,6 +77,7 @@
 #include "window_manager.h"
 #include "mouse_handler.h"
 
+#include "event_serialize.c"
 #include "sa.m"
 #include "mission_control.c"
 #include "event_loop.c"

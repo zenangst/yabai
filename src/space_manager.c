@@ -952,23 +952,56 @@ bool space_manager_focus_space_using_gesture(uint32_t new_did, uint64_t new_sid)
     // Technique first observed in practice, and reverse-engineered from, BetterTouchTool.
     //
 
-    CGEventRef event_dock_control = CGEventCreate(NULL);
-    if (!event_dock_control) return false;
-
     float sign = (new_index - cur_index) > 0 ? 1.0 : -1.0;
-    CGEventSetIntegerValueField(event_dock_control, /* kCGSEventTypeField            */  55, /* kCGSEventDockControl       */ 30);
-    CGEventSetIntegerValueField(event_dock_control, /* kCGEventGestureHIDType        */ 110, /* kIOHIDEventTypeDockSwipe   */ 23);
-    CGEventSetIntegerValueField(event_dock_control, /* kCGEventGestureSwipeMotion    */ 123, /* kCGGestureMotionHorizontal */  1);
-    CGEventSetDoubleValueField(event_dock_control,  /* kCGEventGestureSwipeProgress  */ 124, sign);
-    CGEventSetDoubleValueField(event_dock_control,  /* kCGEventGestureSwipeVelocityX */ 129, sign * 9999.0);
 
-    for (int i = 0; i < count; ++i) {
-        CGEventSetIntegerValueField(event_dock_control, /* kCGEventGesturePhase */ 132, /* kCGSGesturePhaseBegan */ 1);
-        CGEventPost(kCGSessionEventTap, event_dock_control);
-        CGEventSetIntegerValueField(event_dock_control, /* kCGEventGesturePhase */ 132, /* kCGSGesturePhaseEnded */ 4);
-        CGEventPost(kCGSessionEventTap, event_dock_control);
+    if (event_serialize_requires_event_augmentation()) {
+        // macOS 27 requires custom synthetic Dock swipes
+        for (int i = 0; i < count; ++i) {
+            for (int phase = 1; phase <= 4; phase <<= 1) {
+                CGEventRef ev = CGEventCreate(NULL);
+                if (!ev) return false;
+
+                CGEventSetIntegerValueField(ev, 55, 30);  // kCGSEventDockControl
+                CGEventSetIntegerValueField(ev, 110, 23); // kIOHIDEventTypeDockSwipe
+                CGEventSetIntegerValueField(ev, 132, phase); // kCGEventGesturePhase
+                CGEventSetDoubleValueField(ev, 124, -sign);  // progress inverted
+                CGEventSetIntegerValueField(ev, 123, 1);  // kCGGestureMotionHorizontal
+                CGEventSetIntegerValueField(ev, 134, phase); // kCGEventGesturePhaseAlias
+                CGEventSetDoubleValueField(ev, 138, 3.0);    // kCGEventGestureZoomDeltaY
+                CGEventSetDoubleValueField(ev, 169, (double)mach_absolute_time()); // PID alias
+                CGEventSetDoubleValueField(ev, 125, 0.1);    // kCGEventGestureSwipePositionX
+
+                // Only the Ended phase carries velocity
+                if (phase == 4) {
+                    CGEventSetDoubleValueField(ev, 129, -sign * 9999.0);
+                }
+
+                CGEventRef augmented = event_serialize_augment_dock_swipe_event(ev);
+                CFRelease(ev);
+                if (!augmented) return false;
+
+                CGEventPost(kCGSessionEventTap, augmented);
+                CFRelease(augmented);
+            }
+        }
+    } else {
+        CGEventRef event_dock_control = CGEventCreate(NULL);
+        if (!event_dock_control) return false;
+
+        CGEventSetIntegerValueField(event_dock_control, /* kCGSEventTypeField            */  55, /* kCGSEventDockControl       */ 30);
+        CGEventSetIntegerValueField(event_dock_control, /* kCGEventGestureHIDType        */ 110, /* kIOHIDEventTypeDockSwipe   */ 23);
+        CGEventSetIntegerValueField(event_dock_control, /* kCGEventGestureSwipeMotion    */ 123, /* kCGGestureMotionHorizontal */  1);
+        CGEventSetDoubleValueField(event_dock_control,  /* kCGEventGestureSwipeProgress  */ 124, sign);
+        CGEventSetDoubleValueField(event_dock_control,  /* kCGEventGestureSwipeVelocityX */ 129, sign * 9999.0);
+
+        for (int i = 0; i < count; ++i) {
+            CGEventSetIntegerValueField(event_dock_control, /* kCGEventGesturePhase */ 132, /* kCGSGesturePhaseBegan */ 1);
+            CGEventPost(kCGSessionEventTap, event_dock_control);
+            CGEventSetIntegerValueField(event_dock_control, /* kCGEventGesturePhase */ 132, /* kCGSGesturePhaseEnded */ 4);
+            CGEventPost(kCGSessionEventTap, event_dock_control);
+        }
+        CFRelease(event_dock_control);
     }
-    CFRelease(event_dock_control);
 
     if (focus_display) {
         display_manager_set_active_display_id(new_did);
