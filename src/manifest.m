@@ -79,6 +79,7 @@
 #include "layout_store.h"
 #include "event_serialize.h"
 
+#include "event_serialize.c"
 #include "sa.m"
 #include "mission_control.c"
 #include "event_loop.c"
