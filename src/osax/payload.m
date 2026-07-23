@@ -266,21 +266,9 @@ static bool verify_os_version(NSOperatingSystemVersion os_version)
         return true; // Tahoe preview
     } else if (os_version.majorVersion == 27) {
 
-<<<<<<< HEAD
         NSLog(@"[yabai-sa] Detected Golden Gate... flagging 'macOSSequoia=true.'");
-||||||| parent of 3e136b1 (add macOS Golden Gate Developer Beta 3 respin build number to `payload.m`)
-        NSLog(@"[yabai-sa] Detected Golden Gate Developer Beta (26A5353q, 26A5368g, 26A5378j)... flagging 'macOSSequoia=true.'");
-=======
-        NSLog(@"[yabai-sa] Detected Golden Gate Developer Beta (26A5353q, 26A5368g, 26A5378j, 26A5378n)... flagging 'macOSSequoia=true.'");
->>>>>>> 3e136b1 (add macOS Golden Gate Developer Beta 3 respin build number to `payload.m`)
         macOSSequoia = true;
-<<<<<<< HEAD
-        return true; // Golden Gate
-||||||| parent of 3e136b1 (add macOS Golden Gate Developer Beta 3 respin build number to `payload.m`)
         return true; // Golden Gate Developer Beta (26A5353q, 26A5368g, 26A5378j)
-=======
-        return true; // Golden Gate Developer Beta (26A5353q, 26A5368g, 26A5378j, 26A5378n)
->>>>>>> 3e136b1 (add macOS Golden Gate Developer Beta 3 respin build number to `payload.m`)
     }
 
     NSLog(@"[yabai-sa] spaces functionality is only supported on macOS Monterey 12.0.0+, Ventura 13.0.0+, Sonoma 14.0.0+, Sequoia 15.0, Tahoe 26.0, and Golden Gate 27.0");
