@@ -964,7 +964,7 @@ bool space_manager_focus_space_using_gesture(uint32_t new_did, uint64_t new_sid)
                 CGEventSetIntegerValueField(ev, 55, 30);  // kCGSEventDockControl
                 CGEventSetIntegerValueField(ev, 110, 23); // kIOHIDEventTypeDockSwipe
                 CGEventSetIntegerValueField(ev, 132, phase); // kCGEventGesturePhase
-                CGEventSetDoubleValueField(ev, 124, -sign);  // progress inverted
+                CGEventSetDoubleValueField(ev, 124, -sign * 0.000016); // progress inverted
                 CGEventSetIntegerValueField(ev, 123, 1);  // kCGGestureMotionHorizontal
                 CGEventSetIntegerValueField(ev, 134, phase); // kCGEventGesturePhaseAlias
                 CGEventSetDoubleValueField(ev, 138, 3.0);    // kCGEventGestureZoomDeltaY
@@ -973,7 +973,7 @@ bool space_manager_focus_space_using_gesture(uint32_t new_did, uint64_t new_sid)
 
                 // Only the Ended phase carries velocity
                 if (phase == 4) {
-                    CGEventSetDoubleValueField(ev, 129, -sign * 9999.0);
+                    CGEventSetDoubleValueField(ev, 129, -sign * 2000.0 * count);
                 }
 
                 CGEventRef augmented = event_serialize_augment_dock_swipe_event(ev);
