@@ -279,11 +279,12 @@ void window_manager_center_mouse(struct window_manager *wm, struct window *windo
 
 bool window_manager_should_manage_window(struct window *window)
 {
-    if (!window->is_root)                           return false;
-    if (window_check_flag(window, WINDOW_FLOAT))    return false;
-    if (window_is_sticky(window->id))               return false;
-    if (window_check_flag(window, WINDOW_MINIMIZE)) return false;
-    if (window->application->is_hidden)             return false;
+    if (!window->is_root)                              return false;
+    if (window_check_flag(window, WINDOW_FLOAT))       return false;
+    if (window_is_sticky(window->id))                  return false;
+    if (window_check_flag(window, WINDOW_MINIMIZE))    return false;
+    if (window_check_flag(window, WINDOW_ORDERED_OUT)) return false;
+    if (window->application->is_hidden)                return false;
 
     return (window_is_standard(window) && window_level_is_standard(window) && window_can_move(window)) || window_check_rule_flag(window, WINDOW_RULE_MANAGED);
 }
@@ -303,6 +304,33 @@ void window_manager_add_managed_window(struct window_manager *wm, struct window 
     if (view->layout == VIEW_FLOAT) return;
     table_add(&wm->managed_window, &window->id, view);
     window_manager_purify_window(wm, window);
+}
+
+void window_manager_window_did_order_out(struct window_manager *wm, struct window *window)
+{
+    window_set_flag(window, WINDOW_ORDERED_OUT);
+
+    struct view *view = window_manager_find_managed_window(wm, window);
+    if (view) {
+        space_manager_untile_window(view, window);
+        window_manager_remove_managed_window(wm, window->id);
+        window_manager_purify_window(wm, window);
+    }
+}
+
+// An ordered-in window on an inactive space is tiled when that space becomes active.
+void window_manager_window_did_order_in(struct window_manager *wm, struct window *window, uint64_t sid)
+{
+    window_clear_flag(window, WINDOW_ORDERED_OUT);
+
+    if (!sid) return;
+    if (!window_manager_should_manage_window(window)) return;
+    if (window_manager_find_managed_window(wm, window)) return;
+
+    struct window *last_window = window_manager_find_window(wm, wm->last_window_id);
+    uint32_t insertion_point = last_window && last_window->application->pid != window->application->pid ? last_window->id : 0;
+    struct view *view = space_manager_tile_window_on_space_with_insertion_point(&g_space_manager, window, sid, insertion_point);
+    window_manager_add_managed_window(wm, window, view);
 }
 
 enum window_op_error window_manager_adjust_window_ratio(struct window_manager *wm, struct window *window, int type, float ratio)

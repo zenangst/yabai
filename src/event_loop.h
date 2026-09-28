@@ -18,6 +18,8 @@
     EVENT_TYPE_ENTRY(WINDOW_DEMINIMIZED) \
     EVENT_TYPE_ENTRY(WINDOW_TITLE_CHANGED) \
     EVENT_TYPE_ENTRY(SLS_WINDOW_ORDERED) \
+    EVENT_TYPE_ENTRY(SLS_WINDOW_IS_VISIBLE) \
+    EVENT_TYPE_ENTRY(SLS_WINDOW_IS_INVISIBLE) \
     EVENT_TYPE_ENTRY(SLS_WINDOW_DESTROYED) \
     EVENT_TYPE_ENTRY(SLS_SPACE_CREATED) \
     EVENT_TYPE_ENTRY(SLS_SPACE_DESTROYED) \
@@ -75,4 +77,3 @@ void event_loop_post(struct event_loop *event_loop, enum event_type type, void *
 void update_window_notifications(void);
 
 #endif
-

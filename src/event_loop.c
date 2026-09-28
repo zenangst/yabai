@@ -959,6 +959,48 @@ static EVENT_HANDLER(SLS_WINDOW_ORDERED)
     if (node) SLSOrderWindow(g_connection, node->feedback_window.id, 1, node->window_order[0]);
 }
 
+// Visibility notifications are queued; re-check ordered-in state before changing management.
+static EVENT_HANDLER(SLS_WINDOW_IS_INVISIBLE)
+{
+    uint32_t wid = (uint64_t)(intptr_t) context;
+    debug("%s: %d\n", __FUNCTION__, wid);
+
+    struct window *window = window_manager_find_window(&g_window_manager, wid);
+    if (!window) return;
+
+    if (!__sync_bool_compare_and_swap(&window->id_ptr, &window->id, &window->id)) {
+        debug("%s: %d has been marked invalid by the system, ignoring event..\n", __FUNCTION__, wid);
+        return;
+    }
+
+    uint8_t ordered_in = 0;
+    SLSWindowIsOrderedIn(g_connection, wid, &ordered_in);
+    if (ordered_in) return;
+
+    window_manager_window_did_order_out(&g_window_manager, window);
+}
+
+static EVENT_HANDLER(SLS_WINDOW_IS_VISIBLE)
+{
+    uint32_t wid = (uint64_t)(intptr_t) context;
+    debug("%s: %d\n", __FUNCTION__, wid);
+
+    struct window *window = window_manager_find_window(&g_window_manager, wid);
+    if (!window || !window_check_flag(window, WINDOW_ORDERED_OUT)) return;
+
+    if (!__sync_bool_compare_and_swap(&window->id_ptr, &window->id, &window->id)) {
+        debug("%s: %d has been marked invalid by the system, ignoring event..\n", __FUNCTION__, wid);
+        return;
+    }
+
+    uint8_t ordered_in = 0;
+    SLSWindowIsOrderedIn(g_connection, wid, &ordered_in);
+    if (!ordered_in) return;
+
+    uint64_t sid = space_manager_active_space();
+    window_manager_window_did_order_in(&g_window_manager, window, space_manager_is_window_on_space(sid, window) ? sid : 0);
+}
+
 static EVENT_HANDLER(SLS_WINDOW_DESTROYED)
 {
     uint32_t wid = (uint64_t)(intptr_t) context;
