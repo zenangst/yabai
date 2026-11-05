@@ -94,7 +94,6 @@
 #include "process_manager.c"
 #include "application.c"
 #include "display_manager.c"
-#include "event_serialize.c"
 #include "space_manager.c"
 #include "window_manager.c"
 #include "mouse_handler.c"

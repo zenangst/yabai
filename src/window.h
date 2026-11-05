@@ -117,7 +117,8 @@ enum window_flag
     WINDOW_RESIZABLE  = 0x80,
     // NOTE: a tracked tab that handed its node to a sibling; cleared when it gets the node back
     // or leaves the group. WINDOW_CREATED skips tracked wids, so nothing else re-tiles it.
-    WINDOW_TAB_MEMBER = 0x100
+    WINDOW_TAB_MEMBER = 0x100,
+    WINDOW_ORDERED_OUT = 0x200
 };
 
 enum window_rule_flag
