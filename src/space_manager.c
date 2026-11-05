@@ -1022,7 +1022,7 @@ bool space_manager_focus_space_using_gesture(uint32_t new_did, uint64_t new_sid)
                 CGEventSetIntegerValueField(ev, /* kCGSEventTypeField            */  55, /* kCGSEventDockControl       */ 30);
                 CGEventSetIntegerValueField(ev, /* kCGEventGestureHIDType        */ 110, /* kIOHIDEventTypeDockSwipe   */ 23);
                 CGEventSetIntegerValueField(ev, /* kCGEventGesturePhase          */ 132, phase);
-                CGEventSetDoubleValueField(ev,  /* kCGEventGestureSwipeProgress  */ 124, progress);
+                CGEventSetDoubleValueField(ev,  /* kCGEventGestureSwipeProgress  */ 124, progress * 0.000016);
                 CGEventSetIntegerValueField(ev, /* kCGEventGestureSwipeMotion    */ 123, /* kCGGestureMotionHorizontal */  1);
                 CGEventSetIntegerValueField(ev, /* kCGEventGesturePhaseAlias     */ 134, phase);
                 CGEventSetDoubleValueField(ev,  /* kCGEventGestureZoomDeltaY     */ 138, 3.0);
@@ -1030,7 +1030,7 @@ bool space_manager_focus_space_using_gesture(uint32_t new_did, uint64_t new_sid)
                 CGEventSetDoubleValueField(ev,  /* kCGEventGestureSwipePositionX */ 125, 0.1);
 
                 if (phase == 4) {
-                    CGEventSetDoubleValueField(ev, /* kCGEventGestureSwipeVelocityX */ 129, modern_vel);
+                    CGEventSetDoubleValueField(ev, /* kCGEventGestureSwipeVelocityX */ 129, 2000 * count);
                 }
 
                 CGEventRef augmented = iss_augment_dock_swipe_event(ev);
