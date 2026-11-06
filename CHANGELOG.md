@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- **Switching to an application running under a debugger**: An application launched from Xcode could not be reached with `cmd + tab` or the Dock while its windows were on another space. yabai ignores such processes so that one stopped at a breakpoint cannot block it, and their activations were dropped too. yabai now follows them to their space through WindowServer, still without sending them any accessibility request
+- **Stacks past 32 windows**: yabai keeps the windows of a stack in one layout node with room for 32 of them. `window --stack` and dropping a window onto a stack with the mouse refused a window past that limit, but two other ways into a stack never checked it:
+  - a window that appeared on a space with `layout stack` (opened, deminimized, moved there from another space or unfloated). Such a space is a single node, so the limit is 32 windows per space
+  - a window opened after `window --insert stack` on a BSP space, when the stack it was meant for was already full
+
+  The 33rd window was written past the end of the node's window list, over the window order, the window count, the split ratio and the insert feedback state of that node. The layout went wrong from then on, and yabai could crash. Now a window past the limit of a stack layout stays out of the layout where it is, like a window on a space with `layout float`, and a window meant for a full stack on a BSP space gets a tile of its own next to the stack. Found by the new benchmarks in `bench/`, which crashed on a stack of 64 windows
+
+## [7.3.2] - 2026-11-05
+### Fixed
+- **Switching to an application with native tabs**: With `window_native_tabs on`, activating an application from the Dock or with a hotkey could take several tries to reach its space. A hidden tab keeps reporting the space it was last shown on after its group moves to another space, so yabai thought the application already had a window on screen and stayed put. Hidden tabs no longer count when yabai decides where an application is
 
 ## [7.3.1] - 2026-11-04
 ### Fixed
@@ -995,7 +1006,8 @@ The *window_destroyed* signal is now triggered for windows that are implicitly d
 ### Added
 - First official release
 
-[Unreleased]: https://github.com/Christian-SC26/yabai/compare/v7.3.1...HEAD
+[Unreleased]: https://github.com/Christian-SC26/yabai/compare/v7.3.2...HEAD
+[7.3.2]: https://github.com/Christian-SC26/yabai/compare/v7.3.1...v7.3.2
 [7.3.1]: https://github.com/Christian-SC26/yabai/compare/v7.3.0...v7.3.1
 [7.3.0]: https://github.com/Christian-SC26/yabai/compare/v7.2.1...v7.3.0
 [7.2.1]: https://github.com/Christian-SC26/yabai/compare/v7.2.0...v7.2.1

@@ -411,6 +411,60 @@ out:
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+//
+// NOTE: Move to the space of an application that was activated while none of its windows are on screen.
+// The accessibility element is optional: a process running under a debugger is never sent accessibility
+// requests, as one that is stopped at a breakpoint would block the event loop.
+//
+static struct { uint64_t target_sid; uint64_t time; } g_last_follow_to_space;
+
+static void application_follow_to_space(uint64_t target_sid, ProcessSerialNumber psn, AXUIElementRef ref)
+{
+    uint64_t now = read_os_timer();
+
+    bool gesture_in_progress = __atomic_load_n(&__pending_gesture, __ATOMIC_RELAXED);
+    uint64_t last_gesture_time = __atomic_load_n(&__last_gesture_time, __ATOMIC_RELAXED);
+    uint64_t dt_gesture_ms = (now > last_gesture_time) ? (now - last_gesture_time) / 1000000ULL : 0;
+    bool in_mc = mission_control_is_active();
+
+    //
+    // NOTE: When we move to an empty space, the system activates the next application in its
+    // activation order. That is not a user request to visit that application, so stay on the empty space.
+    //
+
+    uint64_t last_empty_focus_time = __atomic_load_n(&__last_empty_space_focus_time, __ATOMIC_RELAXED);
+    uint64_t dt_empty_focus_ms = (now > last_empty_focus_time) ? (now - last_empty_focus_time) / 1000000ULL : 0;
+
+    if (dt_empty_focus_ms < 400) {
+        debug("%s: suppressing space switch to %lld after focusing an empty space (dt=%llums)\n",
+              __FUNCTION__, target_sid, dt_empty_focus_ms);
+    } else if (in_mc || gesture_in_progress || dt_gesture_ms < 400) {
+        debug("%s: suppressing space switch to %lld during %s (in_prog=%d, dt=%llums, mc=%d)\n",
+              __FUNCTION__, target_sid, in_mc ? "mission control" : "trackpad gesture", gesture_in_progress, dt_gesture_ms, in_mc);
+    } else {
+        uint64_t dt_ms = (now > g_last_follow_to_space.time) ? (now - g_last_follow_to_space.time) / 1000000ULL : 0;
+        if (target_sid == g_last_follow_to_space.target_sid && dt_ms < 250) {
+            debug("%s: suppressing duplicate space switch to %lld (dt=%llums)\n", __FUNCTION__, target_sid, dt_ms);
+        } else if (target_sid != g_last_follow_to_space.target_sid && dt_ms < 200) {
+            debug("%s: rate-limiting rapid space switch to %lld (dt=%llums < 200ms)\n", __FUNCTION__, target_sid, dt_ms);
+        } else {
+            g_last_follow_to_space.target_sid = target_sid;
+            g_last_follow_to_space.time = now;
+            __atomic_store_n(&__last_space_change_time, now, __ATOMIC_RELEASE);
+
+            uint64_t last_cmd_tab_time = __atomic_load_n(&__last_cmd_tab_time, __ATOMIC_RELAXED);
+            float dt = ((float) now - last_cmd_tab_time) * (1000.0f / (float)read_os_freq());
+            if (dt > 1500.0f && ref) {
+                CFTypeRef dummy = NULL;
+                AXUIElementCopyAttributeValue(ref, CFSTR("__fence"), &dummy);
+            }
+
+            SLSSpaceSetFrontPSN(g_connection, target_sid, psn);
+            space_manager_focus_space(target_sid);
+        }
+    }
+}
+
 static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
 {
     struct process *process = context;
@@ -514,8 +568,15 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
     struct window *visible_win = NULL;
     bool focused_on_visible_space = false;
 
+    //
+    // NOTE: A hidden native tab is ordered out, and WindowServer keeps reporting the space it was last shown on,
+    // even after its group has moved to another space. It says nothing about where the application is, so only
+    // the windows that are actually shown are considered when deciding whether to follow the application.
+    //
+
     for (int w = 0; w < win_count; ++w) {
         struct window *win = win_list[w];
+        if (window_check_flag(win, WINDOW_TAB_MEMBER)) continue;
         if (window_check_flag(win, WINDOW_STICKY) || window_is_sticky(win->id)) {
             focused_on_visible_space = true;
             if (!visible_win) visible_win = win;
@@ -531,10 +592,6 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
     }
 
     if (g_space_manager.skip_window_focus_animation) {
-        uint64_t now = read_os_timer();
-        static uint64_t s_last_switch_target_sid = 0;
-        static uint64_t s_last_switch_time = 0;
-
         uint64_t target_sid = 0;
 
         if (!focused_on_visible_space) {
@@ -556,6 +613,7 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
 
             if (!target_sid && win_count > 0) {
                 for (int w = 0; w < win_count; ++w) {
+                    if (window_check_flag(win_list[w], WINDOW_TAB_MEMBER)) continue;
                     if (!window_is_sticky(win_list[w]->id) && !window_check_flag(win_list[w], WINDOW_STICKY)) {
                         uint64_t w_sid = window_space(win_list[w]->id);
                         if (w_sid) {
@@ -571,47 +629,7 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
             }
 
             if (!focused_on_visible_space && target_sid && !space_is_visible(target_sid)) {
-                bool gesture_in_progress = __atomic_load_n(&__pending_gesture, __ATOMIC_RELAXED);
-                uint64_t last_gesture_time = __atomic_load_n(&__last_gesture_time, __ATOMIC_RELAXED);
-                uint64_t dt_gesture_ms = (now > last_gesture_time) ? (now - last_gesture_time) / 1000000ULL : 0;
-                bool in_mc = mission_control_is_active();
-
-                //
-                // NOTE: When we move to an empty space, the system activates the next application in its
-                // activation order. That is not a user request to visit that application, so stay on the empty space.
-                //
-
-                uint64_t last_empty_focus_time = __atomic_load_n(&__last_empty_space_focus_time, __ATOMIC_RELAXED);
-                uint64_t dt_empty_focus_ms = (now > last_empty_focus_time) ? (now - last_empty_focus_time) / 1000000ULL : 0;
-
-                if (dt_empty_focus_ms < 400) {
-                    debug("%s: suppressing space switch to %lld after focusing an empty space (dt=%llums)\n",
-                          __FUNCTION__, target_sid, dt_empty_focus_ms);
-                } else if (in_mc || gesture_in_progress || dt_gesture_ms < 400) {
-                    debug("%s: suppressing space switch to %lld during %s (in_prog=%d, dt=%llums, mc=%d)\n",
-                          __FUNCTION__, target_sid, in_mc ? "mission control" : "trackpad gesture", gesture_in_progress, dt_gesture_ms, in_mc);
-                } else {
-                    uint64_t dt_ms = (now > s_last_switch_time) ? (now - s_last_switch_time) / 1000000ULL : 0;
-                    if (target_sid == s_last_switch_target_sid && dt_ms < 250) {
-                        debug("%s: suppressing duplicate space switch to %lld (dt=%llums)\n", __FUNCTION__, target_sid, dt_ms);
-                    } else if (target_sid != s_last_switch_target_sid && dt_ms < 200) {
-                        debug("%s: rate-limiting rapid space switch to %lld (dt=%llums < 200ms)\n", __FUNCTION__, target_sid, dt_ms);
-                    } else {
-                        s_last_switch_target_sid = target_sid;
-                        s_last_switch_time = now;
-                        __atomic_store_n(&__last_space_change_time, now, __ATOMIC_RELEASE);
-
-                        uint64_t last_cmd_tab_time = __atomic_load_n(&__last_cmd_tab_time, __ATOMIC_RELAXED);
-                        float dt = ((float) now - last_cmd_tab_time) * (1000.0f / (float)read_os_freq());
-                        if (dt > 1500.0f) {
-                            CFTypeRef dummy = NULL;
-                            AXUIElementCopyAttributeValue(application->ref, CFSTR("__fence"), &dummy);
-                        }
-
-                        SLSSpaceSetFrontPSN(g_connection, target_sid, process->psn);
-                        space_manager_focus_space(target_sid);
-                    }
-                }
+                application_follow_to_space(target_sid, process->psn, application->ref);
             }
         }
     }
@@ -634,6 +652,7 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
         }
     } else if (!window && win_count > 0) {
         for (int w = 0; w < win_count; ++w) {
+            if (window_check_flag(win_list[w], WINDOW_TAB_MEMBER)) continue;
             uint64_t sid = window_space(win_list[w]->id);
             if (space_is_visible(sid) || window_is_sticky(win_list[w]->id) || window_check_flag(win_list[w], WINDOW_STICKY)) {
                 window = win_list[w];
@@ -681,6 +700,34 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
     window_manager_validate_and_check_for_windows_on_space(&g_space_manager, &g_window_manager, g_space_manager.current_space_id);
 }
 #pragma clang diagnostic pop
+
+static EVENT_HANDLER(DEBUGGED_APPLICATION_FRONT_SWITCHED)
+{
+    pid_t pid = (pid_t)(intptr_t) context;
+    int connection = param1;
+
+    if (!g_space_manager.skip_window_focus_animation) return;
+
+    uint64_t now = read_os_timer();
+    uint64_t last_mc_exit = __atomic_load_n(&g_mission_control_exit_time, __ATOMIC_RELAXED);
+    uint64_t dt_mc_exit_ms = (now > last_mc_exit) ? (now - last_mc_exit) / 1000000ULL : 0;
+    if (dt_mc_exit_ms < 600) {
+        debug("%s: %d front switched right after mission control, ignoring..\n", __FUNCTION__, pid);
+        return;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ProcessSerialNumber psn = {0};
+    if (GetProcessForPID(pid, &psn) != noErr) return;
+#pragma clang diagnostic pop
+
+    uint64_t sid = process_manager_active_space_for_psn(connection);
+    if (!sid || space_is_visible(sid)) return;
+
+    debug("%s: %d is running under a debugger, following it to space %lld\n", __FUNCTION__, pid, sid);
+    application_follow_to_space(sid, psn, NULL);
+}
 
 static EVENT_HANDLER(APPLICATION_VISIBLE)
 {
@@ -1754,6 +1801,7 @@ static EVENT_HANDLER(SPACE_CHANGED)
 
                 for (int w = 0; w < win_count; ++w) {
                     struct window *win = win_list[w];
+                    if (window_check_flag(win, WINDOW_TAB_MEMBER)) continue;
                     if (window_check_flag(win, WINDOW_STICKY) || window_is_sticky(win->id) || space_is_visible(window_space(win->id))) {
                         has_visible_window = true;
                         break;
