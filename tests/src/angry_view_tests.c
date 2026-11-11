@@ -104,6 +104,42 @@ ANGRY_TEST(displaysAndDestroysInsertFeedbackWindow) {
                      destroyed);
 }
 
+ANGRY_TEST(movesInsertFeedbackEntryToNewFrontWindowOfStack) {
+    struct window_node node = { .area = {{ 100, 100 }, { 300, 300 }}, .window_count = 1, .window_list = { 7101 }, .window_order = { 7101 }, .insert_dir = STACK };
+    insert_feedback_show(&node);
+    struct window w = { .id = 7102 };
+    view_stack_window_node(&node, &w);
+    uint32_t old_front = 7101, new_front = 7102;
+    bool moved = table_find(&g_window_manager.insert_feedback, &new_front) == &node;
+    bool cleared = table_find(&g_window_manager.insert_feedback, &old_front) == NULL;
+    insert_feedback_destroy(&node);
+    bool removed = table_find(&g_window_manager.insert_feedback, &new_front) == NULL;
+    ANGRY_ASSERT_ALL("insert_feedback entry did not follow the new front window of the stack",
+                     moved,
+                     cleared,
+                     removed);
+}
+
+ANGRY_TEST(handsInsertFeedbackEntryToParentWhenSiblingIsRemoved) {
+    struct view *view = view_create(998);
+    view->layout = VIEW_BSP;
+    struct window w1 = { .id = 7201 };
+    struct window w2 = { .id = 7202 };
+    view_add_window_node(view, &w1);
+    view_add_window_node(view, &w2);
+    struct window_node *node = view_find_window_node(view, w2.id);
+    node->insert_dir = STACK;
+    insert_feedback_show(node);
+    view_remove_window_node(view, &w1);
+    bool handed = table_find(&g_window_manager.insert_feedback, &w2.id) == view->root;
+    insert_feedback_destroy(view->root);
+    bool removed = table_find(&g_window_manager.insert_feedback, &w2.id) == NULL;
+    view_destroy(view);
+    ANGRY_ASSERT_ALL("insert_feedback entry still pointed at the freed sibling node",
+                     handed,
+                     removed);
+}
+
 //
 // NOTE: a node keeps its windows in arrays of NODE_MAX_WINDOW_COUNT entries.
 // A space with a stack layout is a single node, so the window after the last
@@ -165,4 +201,22 @@ ANGRY_TEST(leavesWindowOutOfLayoutWhenTilingOnFullStackSpace)
                               (view->root->window_count == NODE_MAX_WINDOW_COUNT));
     for (int i = NODE_MAX_WINDOW_COUNT - 1; i >= 0; --i) space_manager_untile_window(view, &windows[i]);
     ANGRY_ASSERT(left_out, "tiling a window on a full stack space must leave it out of the layout instead of failing");
+}
+
+ANGRY_TEST(keepsWholeWindowListOfFullStackOutOfNextTemporaryAllocation) {
+    struct view *view = view_create(997);
+    view->layout = VIEW_STACK;
+    struct window windows[NODE_MAX_WINDOW_COUNT];
+    for (int i = 0; i < NODE_MAX_WINDOW_COUNT; ++i) {
+        windows[i] = (struct window) { .id = 7300 + i };
+        view_add_window_node(view, &windows[i]);
+    }
+    int count = 0;
+    uint32_t *list = view_find_window_list(view, &count);
+    uint32_t *next = ts_alloc_list(uint32_t, NODE_MAX_WINDOW_COUNT);
+    memset(next, 0xff, sizeof(uint32_t) * NODE_MAX_WINDOW_COUNT);
+    bool intact = count == NODE_MAX_WINDOW_COUNT;
+    for (int i = 0; intact && i < count; ++i) intact = list[i] != 0xffffffff;
+    view_destroy(view);
+    ANGRY_ASSERT(intact, "the next temporary allocation overwrote the window list of a full stack");
 }

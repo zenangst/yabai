@@ -198,6 +198,7 @@ void window_manager_apply_manage_rules_to_window(struct space_manager *sm, struc
     }
 
     if (match) window_manager_apply_manage_rule_effects_to_window(sm, wm, window, &effects);
+    if (effects.scratchpad) free(effects.scratchpad);
 }
 
 void window_manager_apply_rules_to_window(struct space_manager *sm, struct window_manager *wm, struct window *window, char *window_title, char *window_role, char *window_subrole, bool one_shot_rules)
@@ -222,6 +223,7 @@ void window_manager_apply_rules_to_window(struct space_manager *sm, struct windo
     }
 
     if (match) window_manager_apply_rule_effects_to_window(sm, wm, window, &effects);
+    if (effects.scratchpad) free(effects.scratchpad);
 }
 
 void window_manager_set_focus_follows_mouse(struct window_manager *wm, enum ffm_mode mode)
@@ -303,6 +305,18 @@ void window_manager_remove_managed_window(struct window_manager *wm, uint32_t wi
 void window_manager_add_managed_window(struct window_manager *wm, struct window *window, struct view *view)
 {
     if (view->layout == VIEW_FLOAT) return;
+
+    //
+    // NOTE: a window that did not get a node, because the stack it was meant for
+    // is full, is not managed. It stays where it is at the normal layer, and gets
+    // picked up again once there is room for it.
+    //
+
+    if (!view_find_window_node(view, window->id)) {
+        window_manager_adjust_layer(window, LAYER_NORMAL);
+        return;
+    }
+
     table_add(&wm->managed_window, &window->id, view);
     window_manager_purify_window(wm, window);
 }
@@ -487,7 +501,7 @@ static inline void window_manager_notify_jankyborders(struct window_animation *a
             uint32_t real_wid[512];
         } data = { event, 0 };
 
-        for (int i = 0; i < animation_count; ++i) {
+        for (int i = 0; i < animation_count && data.count < array_count(data.proxy_wid); ++i) {
             if (skip && __atomic_load_n(&animation_list[i].skip, __ATOMIC_RELAXED)) continue;
 
             data.proxy_wid[data.count] = animation_list[i].proxy.id;
@@ -1650,7 +1664,7 @@ struct window **window_manager_add_application_windows(struct space_manager *sm,
     for (int i = 0; i < rule_len; ++i) {
         if (rule_check_flag(&wm->rules[i], RULE_ONE_SHOT_REMOVE)) {
             rule_destroy(&wm->rules[i]);
-            if (buf_del(wm->rules, i)) {
+            if (buf_del_ordered(wm->rules, i)) {
                 --i;
                 --rule_len;
             }
@@ -1935,7 +1949,9 @@ bool window_manager_add_existing_application_windows(struct space_manager *sm, s
 
                     memcpy(data+0xc, &element_id, sizeof(uint64_t));
                     AXUIElementRef element_ref = _AXUIElementCreateWithRemoteToken(data_ref);
+                    if (!element_ref) continue;
 
+                    bool consumed = false;
                     const void *role = NULL;
                     AXUIElementCopyAttributeValue(element_ref, kAXRoleAttribute, &role);
 
@@ -1956,13 +1972,14 @@ bool window_manager_add_existing_application_windows(struct space_manager *sm, s
 
                             if (matched) {
                                 window_manager_create_and_add_window(sm, wm, application, element_ref, element_wid, false);
-                            } else {
-                                CFRelease(element_ref);
+                                consumed = true;
                             }
                         }
 
                         CFRelease(role);
                     }
+
+                    if (!consumed) CFRelease(element_ref);
                 }
 
                 CFRelease(data_ref);
@@ -2066,6 +2083,16 @@ enum window_op_error window_manager_stack_window(struct space_manager *sm, struc
     struct view *a_view = window_manager_find_managed_window(wm, a);
     if (!a_view) return WINDOW_OP_ERROR_INVALID_SRC_NODE;
 
+    //
+    // NOTE: check for room before b is taken out of its node, so that a full stack
+    // leaves b where it is. b does not take a slot of its own if it is already in
+    // the stack. Untiling b can free and merge nodes, so look up a_node again after.
+    //
+
+    struct window_node *a_node = view_find_window_node(a_view, a->id);
+    int stack_count = a_node->window_count - window_node_contains_window(a_node, b->id);
+    if (stack_count >= NODE_MAX_WINDOW_COUNT) return WINDOW_OP_ERROR_MAX_STACK;
+
     struct view *b_view = window_manager_find_managed_window(wm, b);
     if (b_view) {
         space_manager_untile_window(b_view, b);
@@ -2077,8 +2104,7 @@ enum window_op_error window_manager_stack_window(struct space_manager *sm, struc
         if (window_check_flag(b, WINDOW_STICKY)) window_manager_make_window_sticky(sm, wm, b, false);
     }
 
-    struct window_node *a_node = view_find_window_node(a_view, a->id);
-    if (a_node->window_count+1 >= NODE_MAX_WINDOW_COUNT) return WINDOW_OP_ERROR_MAX_STACK;
+    a_node = view_find_window_node(a_view, a->id);
 
     view_stack_window_node(a_node, b);
     window_manager_add_managed_window(wm, b, a_view);
@@ -2252,6 +2278,7 @@ enum window_op_error window_manager_swap_window(struct space_manager *sm, struct
 
         a_node->window_list[b_list_index] = a->id;
         a_node->window_order[b_order_index] = a->id;
+        insert_feedback_rekey(a_node);
 
         if (a->id == wm->focused_window_id) {
             window_manager_focus_window_with_raise(&b->application->psn, b->id, b->ref);

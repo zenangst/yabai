@@ -37,6 +37,7 @@ static MOUSE_HANDLER(mouse_handler)
         event_loop_post(&g_event_loop, MOUSE_DOWN, (void *) CFRetain(event), mod);
 
         if (mod == mouse_state->modifier) {
+            if (mouse_state->consume_mouse_click) CFRelease(mouse_state->consumed_event);
             mouse_state->consume_mouse_click = true;
             mouse_state->consumed_event = (CGEventRef) CFRetain(event);
             return NULL;
@@ -47,6 +48,7 @@ static MOUSE_HANDLER(mouse_handler)
         event_loop_post(&g_event_loop, MOUSE_DOWN, (void *) CFRetain(event), mod);
 
         if (mod == mouse_state->modifier) {
+            if (mouse_state->consume_mouse_click) CFRelease(mouse_state->consumed_event);
             mouse_state->consume_mouse_click = true;
             mouse_state->consumed_event = (CGEventRef) CFRetain(event);
             return NULL;
@@ -56,7 +58,12 @@ static MOUSE_HANDLER(mouse_handler)
     case kCGEventRightMouseUp: {
         event_loop_post(&g_event_loop, MOUSE_UP, (void *) CFRetain(event), 0);
 
-        if (mouse_state->consume_mouse_click) {
+        //
+        // NOTE: a second consumed mouse down replaces the first, so only the up of
+        // the same button ends the consumed click and is posted with its down.
+        //
+
+        if (mouse_state->consume_mouse_click && CGEventGetType(mouse_state->consumed_event) + 1 == type) {
             if (!mouse_state->drag_detected) {
                 CGEventTapPostEvent(proxy, mouse_state->consumed_event);
                 CGEventTapPostEvent(proxy, event);
@@ -88,7 +95,7 @@ static MOUSE_HANDLER(mouse_handler)
                 if (phase == /* kCGSGesturePhaseBegan */ 1) {
                     __atomic_store_n(&__pending_gesture, true, __ATOMIC_RELEASE);
                     if (motion == /* kCGGestureMotionVertical */ 2) {
-                        mission_control_record_state();
+                        mission_control_record_state_from_event_tap();
                     }
                 } else if (phase == /* kCGSGesturePhaseEnded */ 4 || phase == /* kCGSGesturePhaseCancelled */ 8) {
                     __atomic_store_n(&__pending_gesture, false, __ATOMIC_RELEASE);
@@ -166,11 +173,27 @@ enum mouse_drop_action mouse_determine_drop_action(struct mouse_state *ms, struc
 
 void mouse_drop_action_stack(struct window_manager *wm, struct view *src_view, struct window *src_window, struct view *dst_view, struct window *dst_window)
 {
+    //
+    // NOTE: a full stack leaves the dragged window in its own node, put back where
+    // it was. Untiling the window can free and merge nodes, so look up dst_node
+    // again after.
+    //
+
+    struct window_node *dst_node = view_find_window_node(dst_view, dst_window->id);
+    if (!dst_node) return;
+
+    int stack_count = dst_node->window_count - window_node_contains_window(dst_node, src_window->id);
+    if (stack_count >= NODE_MAX_WINDOW_COUNT) {
+        struct window_node *src_node = view_find_window_node(src_view, src_window->id);
+        if (src_node) window_node_flush(src_node);
+        return;
+    }
+
     space_manager_untile_window(src_view, src_window);
     window_manager_remove_managed_window(wm, src_window->id);
 
-    struct window_node *dst_node = view_find_window_node(dst_view, dst_window->id);
-    if (dst_node->window_count+1 < NODE_MAX_WINDOW_COUNT) {
+    dst_node = view_find_window_node(dst_view, dst_window->id);
+    if (dst_node) {
         view_stack_window_node(dst_node, src_window);
         window_manager_add_managed_window(wm, src_window, dst_view);
         window_manager_adjust_layer(src_window, LAYER_BELOW);

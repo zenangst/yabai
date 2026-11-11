@@ -113,13 +113,14 @@ static void window_did_receive_focus(struct window_manager *wm, struct mouse_sta
     if (!view) return;
 
     struct window_node *node = view_find_window_node(view, window->id);
-    if (node->window_count <= 1) return;
+    if (!node || node->window_count <= 1) return;
 
     for (int i = 0; i < node->window_count; ++i) {
         if (node->window_order[i] != window->id) continue;
 
         memmove(node->window_order + 1, node->window_order, sizeof(uint32_t) * i);
         node->window_order[0] = window->id;
+        if (i > 0) insert_feedback_rekey(node);
 
         break;
     }
@@ -972,7 +973,7 @@ static EVENT_HANDLER(WINDOW_CREATED)
     for (int i = 0; i < rule_len; ++i) {
         if (rule_check_flag(&g_window_manager.rules[i], RULE_ONE_SHOT_REMOVE)) {
             rule_destroy(&g_window_manager.rules[i]);
-            if (buf_del(g_window_manager.rules, i)) {
+            if (buf_del_ordered(g_window_manager.rules, i)) {
                 --i;
                 --rule_len;
             }
@@ -2034,6 +2035,12 @@ static EVENT_HANDLER(MOUSE_UP)
 err:
     g_mouse_state.window = NULL;
 res:
+    if (g_mouse_state.feedback_node) {
+        g_mouse_state.feedback_node->insert_dir = 0;
+        insert_feedback_destroy(g_mouse_state.feedback_node);
+        g_mouse_state.feedback_node = NULL;
+    }
+
     g_mouse_state.live_resized = false;
     g_mouse_state.current_action = MOUSE_MODE_NONE;
 out:
@@ -2664,6 +2671,8 @@ static EVENT_HANDLER(SYSTEM_WOKE)
     event_signal_push(SIGNAL_SYSTEM_WOKE, NULL);
 }
 
+#define DAEMON_MESSAGE_MAX_LENGTH (1 << 20)
+
 static EVENT_HANDLER(DAEMON_MESSAGE)
 {
     TIME_FUNCTION;
@@ -2672,8 +2681,16 @@ static EVENT_HANDLER(DAEMON_MESSAGE)
     int bytes_read    = 0;
     int bytes_to_read = 0;
 
-    if (read(param1, &bytes_to_read, sizeof(int)) == sizeof(int)) {
-        char *message = ts_alloc_unaligned(bytes_to_read);
+    //
+    // NOTE: the length comes from the client. A message is at least one empty
+    // token and its terminator, and anything larger than DAEMON_MESSAGE_MAX_LENGTH
+    // is refused rather than allowed to run out the temporary storage.
+    //
+
+    if (read(param1, &bytes_to_read, sizeof(int)) == sizeof(int) && bytes_to_read >= 2 && bytes_to_read <= DAEMON_MESSAGE_MAX_LENGTH) {
+        char *message = ts_alloc_unaligned(bytes_to_read + 2);
+        message[bytes_to_read + 0] = '\0';
+        message[bytes_to_read + 1] = '\0';
 
         do {
             int cur_read = read(param1, message+bytes_read, bytes_to_read-bytes_read);
@@ -2713,6 +2730,7 @@ static void *event_loop_run(void *context)
                 next = __atomic_load_n(&head->next, __ATOMIC_RELAXED);
                 if (!next) goto empty;
             } while (!__sync_bool_compare_and_swap(&event_loop->head, head, next));
+            __atomic_sub_fetch(&event_loop->count, 1, __ATOMIC_RELEASE);
 
             enum event_type type = __atomic_load_n(&next->type, __ATOMIC_RELAXED);
             if (type == MOUSE_DRAGGED || type == MOUSE_MOVED) {
@@ -2720,6 +2738,7 @@ static void *event_loop_run(void *context)
                 while ((peek = __atomic_load_n(&next->next, __ATOMIC_RELAXED)) != NULL) {
                     if (__atomic_load_n(&peek->type, __ATOMIC_RELAXED) != type) break;
                     if (!__sync_bool_compare_and_swap(&event_loop->head, next, peek)) break;
+                    __atomic_sub_fetch(&event_loop->count, 1, __ATOMIC_RELEASE);
                     void *old_context = __atomic_load_n(&next->context, __ATOMIC_RELAXED);
                     if (old_context) CFRelease(old_context);
                     next = peek;
@@ -2746,10 +2765,49 @@ empty:
     return NULL;
 }
 
+//
+// NOTE: events live in a ring of fixed slots that memory_pool_push hands out in
+// turn, and the ring wraps around without knowing which slots the event loop has
+// not handled yet. Every event takes a slot from count before it is pushed and
+// gives it back once the event loop moves past it, so a full ring never reuses
+// the slot of a waiting event. The slot of the event the event loop moved past
+// last, and the slack where the ring wraps, are kept free.
+//
+// When the ring is full a poster waits for room, except on the event loop
+// thread, which would wait for itself, and on the event tap thread, which the
+// event loop joins when the mouse handler is restarted. There the event is
+// dropped; the mouse events posted from the event tap give their retained event
+// back, other contexts are given up.
+//
+
+static bool event_loop_take_slot(struct event_loop *event_loop)
+{
+    uint64_t limit = event_loop->pool.size / sizeof(struct event) - 4;
+    pthread_t self = pthread_self();
+    bool can_wait = !pthread_equal(self, event_loop->thread) && !pthread_equal(self, g_mouse_state.thread);
+
+    for (;;) {
+        uint64_t count = __atomic_load_n(&event_loop->count, __ATOMIC_ACQUIRE);
+        if (count < limit) {
+            if (__sync_bool_compare_and_swap(&event_loop->count, count, count + 1)) return true;
+            continue;
+        }
+
+        if (!can_wait) return false;
+        usleep(1000);
+    }
+}
+
 void event_loop_post(struct event_loop *event_loop, enum event_type type, void *context, int param1)
 {
     bool success;
     struct event *tail, *new_tail;
+
+    if (!event_loop_take_slot(event_loop)) {
+        debug("%s: event queue is full, dropping event %d..\n", __FUNCTION__, type);
+        if (context && (type == MOUSE_DOWN || type == MOUSE_UP || type == MOUSE_DRAGGED || type == MOUSE_MOVED)) CFRelease(context);
+        return;
+    }
 
     new_tail = memory_pool_push(&event_loop->pool, sizeof(struct event));
     __atomic_store_n(&new_tail->type, type, __ATOMIC_RELEASE);

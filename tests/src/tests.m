@@ -706,6 +706,7 @@ static void tests_isolate_scripting_addition(void)
     ANGRY_ENTRY(capturesFrontmostWindowAndSpaceStateOnMissionControlEnter)      \
     ANGRY_ENTRY(maintainsIdempotencyWhenMissionControlStateAlreadyRecorded)     \
     ANGRY_ENTRY(coalescesConsecutiveMouseDraggedEventsInQueue)                  \
+    ANGRY_ENTRY(keepsWaitingEventsWhenEventQueueIsFull) \
     ANGRY_ENTRY(clearsDirtyFlagOnDirectViewFlush)                               \
     ANGRY_ENTRY(defaultsBspLiveResizeToEnabled)                                 \
     ANGRY_ENTRY(coercesInsertDirectionToStackWhenTargetViewIsStacked)           \
@@ -820,6 +821,7 @@ static void tests_isolate_scripting_addition(void)
     ANGRY_ENTRY(addsRuleToWindowManagerRulesBuffer)                             \
     ANGRY_ENTRY(replacesExistingRuleWhenAddingRuleWithIdenticalLabel)           \
     ANGRY_ENTRY(removesRuleByIndexFromWindowManagerBuffer)                      \
+    ANGRY_ENTRY(keepsRegistrationOrderOfRulesAfterRemovingFirstRule) \
     ANGRY_ENTRY(returnsFalseWhenRemovingRuleByInvalidIndex)                     \
     ANGRY_ENTRY(removesRuleByLabelFromWindowManagerBuffer)                      \
     ANGRY_ENTRY(returnsFalseWhenRemovingRuleByNonexistentLabel)                 \
@@ -972,6 +974,9 @@ static void tests_isolate_scripting_addition(void)
     ANGRY_ENTRY(serializesBspViewPropertiesToJsonStream)                        \
     ANGRY_ENTRY(clearsViewRootTreeAndResetsNodeDimensions)                     \
     ANGRY_ENTRY(displaysAndDestroysInsertFeedbackWindow)                        \
+    ANGRY_ENTRY(movesInsertFeedbackEntryToNewFrontWindowOfStack) \
+    ANGRY_ENTRY(handsInsertFeedbackEntryToParentWhenSiblingIsRemoved) \
+    ANGRY_ENTRY(keepsWholeWindowListOfFullStackOutOfNextTemporaryAllocation) \
     ANGRY_ENTRY(leavesFullStackLayoutUntouchedWhenOneMoreWindowArrives)         \
     ANGRY_ENTRY(tilesWindowBesideFullStackInsteadOfStackingOntoIt)              \
     ANGRY_ENTRY(leavesWindowOutOfLayoutWhenTilingOnFullStackSpace)              \
@@ -1040,6 +1045,7 @@ static void tests_isolate_scripting_addition(void)
     ANGRY_ENTRY(reportsUnknownWindowAsNotOnActiveSpace)                         \
     ANGRY_ENTRY(swapsSpaceWithSpaceOnSameAndCrossDisplay)                       \
     ANGRY_ENTRY(movesSpaceToSpaceDetectingErrors)                               \
+    ANGRY_ENTRY(prefersViewFromBeforeOverFreshViewWhenDisplayComesBack) \
     ANGRY_ENTRY(movesSpaceToDisplayDetectingErrors)                             \
     ANGRY_ENTRY(switchesSpaceDetectingSameSpace)                                \
     ANGRY_ENTRY(destroysSpaceDetectingMissingAndInvalidSrc)                      \
@@ -1085,6 +1091,7 @@ static void tests_isolate_scripting_addition(void)
     ANGRY_ENTRY(serializesLeafAndBranchWindowNodesToDictionary)                 \
     ANGRY_ENTRY(collectsAppNamesRecursivelyFromSerializedNodeDictionary)        \
     ANGRY_ENTRY(reconstructsWindowNodeHierarchyFromSerializedDictionary)        \
+    ANGRY_ENTRY(reconstructsWindowNodeFromDictionaryWithWrongValueTypes) \
     ANGRY_ENTRY(buildsSessionDictionaryCapturingDisplaysAndSpaces)              \
     ANGRY_ENTRY(refusesToSaveLayoutOfFloatingSpace)                             \
     ANGRY_ENTRY(refusesToDumpLayoutOfFloatingSpace)                             \
