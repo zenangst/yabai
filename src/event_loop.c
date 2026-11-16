@@ -1915,8 +1915,53 @@ static EVENT_HANDLER(DISPLAY_RESIZED)
     event_signal_push(SIGNAL_DISPLAY_RESIZED, context);
 }
 
+static bool goldengate_mission_control_overlay_visible(void)
+{
+    CFArrayRef window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, 0);
+    if (!window_list) return false;
+
+    bool found = false;
+    int window_count = CFArrayGetCount(window_list);
+
+    for (int i = 0; i < window_count; ++i) {
+        CFDictionaryRef dictionary = CFArrayGetValueAtIndex(window_list, i);
+
+        CFStringRef owner = CFDictionaryGetValue(dictionary, kCGWindowOwnerName);
+        if (!owner) continue;
+
+        CFNumberRef layer_ref = CFDictionaryGetValue(dictionary, kCGWindowLayer);
+        if (!layer_ref) continue;
+
+        int layer = 0;
+        CFNumberGetValue(layer_ref, kCFNumberIntType, &layer);
+        if (layer < 16 || layer > 19) continue;
+
+        bool is_mission_control_owner = CFEqual(CFSTR("WindowManager"), owner) || CFEqual(CFSTR("Dock"), owner);
+        if (is_mission_control_owner) {
+            found = true;
+            break;
+        }
+    }
+
+    CFRelease(window_list);
+    return found;
+}
+
+static void goldengate_detect_mission_control(void)
+{
+    if (!workspace_is_macos_goldengate()) return;
+    if (g_mission_control_mode != MISSION_CONTROL_MODE_INACTIVE) return;
+    if (!goldengate_mission_control_overlay_visible()) return;
+
+    debug("%s: Mission Control overlay is visible\n", __FUNCTION__);
+    g_mission_control_mode = MISSION_CONTROL_MODE_SHOW;
+    event_loop_post(&g_event_loop, MISSION_CONTROL_ENTER, NULL, 0);
+}
+
 static EVENT_HANDLER(MOUSE_DOWN)
 {
+    goldengate_detect_mission_control();
+
     if (mission_control_is_active())                     goto out;
     if (g_mouse_state.current_action != MOUSE_MODE_NONE) goto out;
 
@@ -1957,6 +2002,8 @@ out:
 
 static EVENT_HANDLER(MOUSE_UP)
 {
+    goldengate_detect_mission_control();
+
     if (mission_control_is_active()) goto out;
     if (!g_mouse_state.window)       goto res;
 
@@ -2365,6 +2412,17 @@ static EVENT_HANDLER(MISSION_CONTROL_CHECK_FOR_EXIT)
 
         if (g_mission_control_mode == MISSION_CONTROL_MODE_INACTIVE) {
             mission_control_is_active();
+            return;
+        }
+
+        if (workspace_is_macos_goldengate()) {
+            if (goldengate_mission_control_overlay_visible()) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1f * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                    event_loop_post(&g_event_loop, MISSION_CONTROL_CHECK_FOR_EXIT, NULL, 0);
+                });
+            } else {
+                event_loop_post(&g_event_loop, MISSION_CONTROL_EXIT, NULL, 0);
+            }
             return;
         }
 
