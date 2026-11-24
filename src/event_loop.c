@@ -10,6 +10,7 @@ extern void *g_workspace_context;
 extern int g_layer_below_window_level;
 volatile bool __pending_window_focus;
 volatile bool __pending_gesture;
+volatile bool __pending_synthesized_gesture;
 volatile uint64_t __last_gesture_time;
 volatile uint64_t __last_cmd_tab_time;
 volatile uint64_t __last_space_change_time;
@@ -1780,6 +1781,7 @@ static EVENT_HANDLER(SPACE_CHANGED)
     __atomic_store_n(&__last_space_change_time, now, __ATOMIC_RELEASE);
     g_space_manager.last_space_id = g_space_manager.current_space_id;
     g_space_manager.current_space_id = space_manager_active_space();
+   __atomic_store_n(&__pending_synthesized_gesture, false, __ATOMIC_RELEASE);
 
     if (g_window_manager.menubar_opacity != 1.0f) {
         float alpha = space_is_fullscreen(g_space_manager.current_space_id) ? 1.0f : g_window_manager.menubar_opacity;
