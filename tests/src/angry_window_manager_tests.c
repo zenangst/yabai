@@ -557,6 +557,38 @@ ANGRY_TEST(addsExistingApplicationWindowsSafely)
     ANGRY_ASSERT(!added, "expected add_existing_application_windows to return false on null ref");
 }
 
+ANGRY_TEST(reportsNoUntrackedWindowsWhenVerboseIsDisabled)
+{
+    bool orig = g_verbose;
+    g_verbose = false;
+    int count = window_manager_report_untracked_windows(&g_window_manager, NULL, "test");
+    g_verbose = orig;
+    ANGRY_ASSERT(count == 0, "expected the untracked window check to stay off without debug_output");
+}
+
+ANGRY_TEST(reportsNoLeakedWindowsWhenVerboseIsDisabled)
+{
+    bool orig = g_verbose;
+    g_verbose = false;
+    int count = window_manager_report_leaked_windows("test");
+    g_verbose = orig;
+    ANGRY_ASSERT(count == 0, "expected the leaked window check to stay off without debug_output");
+}
+
+ANGRY_TEST(reportsNoUntrackedWindowsForApplicationWithoutWindows)
+{
+    ProcessSerialNumber psn = {0};
+    GetProcessForPID(getpid(), &psn);
+    struct process proc = { .pid = getpid(), .psn = psn, .name = "yabai_tests" };
+    struct application *app = application_create(&proc);
+    bool orig = g_verbose;
+    g_verbose = true;
+    int count = window_manager_report_untracked_windows(&g_window_manager, app, "test");
+    g_verbose = orig;
+    application_destroy(app);
+    ANGRY_ASSERT(count == 0, "expected no untracked windows for an application that has none");
+}
+
 ANGRY_TEST(refusesInsertionPointForWindowOutsideTheLayout)
 {
     g_mock_active_space = 0x7E574001ULL;
@@ -635,6 +667,20 @@ ANGRY_TEST(keepsShadowFlagWhenScriptingAdditionCannotChangeIt)
     window_set_flag(&win, WINDOW_SHADOW);
     window_manager_toggle_window_shadow(&win);
     ANGRY_ASSERT(window_check_flag(&win, WINDOW_SHADOW), "expected the shadow flag to stay while the scripting addition is unreachable");
+}
+
+ANGRY_TEST(reportsFailedShadowToggleWhenScriptingAdditionIsUnreachable)
+{
+    struct window win = { .id = 9353 };
+    bool toggled = window_manager_toggle_window_shadow(&win);
+    ANGRY_ASSERT(!toggled, "expected the shadow toggle to report failure while the scripting addition is unreachable");
+}
+
+ANGRY_TEST(reportsFailedPurifyWhenScriptingAdditionIsUnreachable)
+{
+    struct window win = { .id = 9354 };
+    bool purified = window_manager_purify_window(&g_window_manager, &win);
+    ANGRY_ASSERT(!purified, "expected purifying a window to report failure while the scripting addition is unreachable");
 }
 
 ANGRY_TEST(togglesScratchpadWindowByLabelReturningFalse)

@@ -22,7 +22,7 @@
 
 #define MAJOR  7
 #define MINOR  3
-#define PATCH  4
+#define PATCH  5
 
 struct signal *g_signal_event[SIGNAL_TYPE_COUNT];
 struct process_manager g_process_manager;
@@ -366,6 +366,7 @@ int main(int argc, char **argv) {
   window_manager_init(&g_window_manager);
   space_manager_begin(&g_space_manager);
   window_manager_begin(&g_space_manager, &g_window_manager);
+  window_manager_report_untracked_windows(&g_window_manager, NULL, "startup");
 
   if (workspace_is_macos_sequoia() ||
       (workspace_is_macos_tahoe() || workspace_is_macos_goldengate())) {
